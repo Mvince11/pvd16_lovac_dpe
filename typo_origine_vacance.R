@@ -7,6 +7,7 @@ library(tibble)
 
 # Fichiers d'entrée / sortie
 LOVAC    <- st_read("Data/lovac_dpe.geojson")
+lovac_fil <- read.csv2("Data/lovac_d16_fil.csv", sep=";")
 UF <- st_read("Data/uf.geojson")
 
 vers_num <- function(x) as.numeric(gsub(",", ".", as.character(x)))
@@ -33,7 +34,7 @@ UF    <- st_make_valid(UF)
 
 lovac_idpro <- st_join(
     LOVAC,
-    UF %>% select(idprocpte),
+    UF %>% select(c(idprocpte, locproptxt)),
     join = st_intersects,
     left = TRUE)
 
@@ -51,3 +52,5 @@ lovac_idpro <- lovac_idpro %>%
     st_drop_geometry(lovac_count_idpro),
     by = "idprocpte"
   )
+
+#### ========= Classement cadastral ===========
