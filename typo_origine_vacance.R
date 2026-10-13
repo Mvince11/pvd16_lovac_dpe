@@ -4,6 +4,7 @@ library(readr)
 library(data.table)
 library(httr2)
 library(tibble)
+library(writexl)
 
 # Fichiers d'entrée / sortie
 LOVAC    <- st_read("Data/lovac_dpe.geojson")
@@ -171,3 +172,53 @@ lovac_ndroit <- lovac_ndroit %>%
       lookup_cadastre[as.character(as.integer(as.character(ff_dcapec2)))]
     )
   )
+
+lovac_ndroit <- lovac_ndroit%>%
+  relocate(clst_cadastrale, .after = ff_dcapec2)
+
+
+#### ================= On enregistre les données aux format xlsx et geojson ================####
+lovac_ndroit %>%
+  st_drop_geometry()%>%
+  write_xlsx("Data/lovac_ndroit.xlsx")
+
+st_write(lovac_ndroit, "Data/lovac_ndroit.geojson")
+
+
+
+#### ===================== FILOSOFI =========================####
+###### =========== lecture des fichiers Filosofi et ORT afin de ne garder que l'intersection car + léger =========== ####
+
+# carreaux <- st_read("Data/Filosofi2021_carreaux_200m_shp/carreaux_200m_met.shp")
+# perimetre <- st_read("Data/ort_ruffec.geojson") %>% st_transform(st_crs(carreaux))
+# 
+# car_ort <- carreaux[st_intersects(carreaux, perimetre, sparse = FALSE)[, 1], ]
+# 
+# st_write(car_ort, "Data/car_ort.geojson")
+
+car_ort <- st_read("Data/car_ort.geojson")
+
+# 1. Créer le taux de pauvreté (men_pauv: nombre de ménages pauvres et men: nombre de ménages)
+carreaux <- carreaux %>%
+  mutate(taux_pauvrete = if_else(men > 0, men_pauv / men * 100, NA_real_))
+
+# 2. Mettre les logements dans le même CRS que les carreaux (3035)
+vac_pts <- lovac_ndroit %>%
+  st_transform(st_crs(carreaux)) 
+
+# 3. Jointure spatiale avec idcar_200m (identiant du carreau), men, men_pau, taux_pauvrete (men_pau/men *100) et i_est_200 (0 : le carreau compte au moins 11 ménages fiscaux, la valeur est issue directement de la source ;
+#  1 : le carreau en compte moins de 11, seuil de confidentialité, et la valeur est une estimation approchée.)
+vac_pauv <- st_join(
+  vac_pts,
+  carreaux %>% select(idcar_200m, men, men_pauv, taux_pauvrete, i_est_200),
+  join = st_within,
+  left = TRUE
+)
+
+st_write(vac_pauv, "Data/lovac_ruffec_traite.geojson")
+
+##### -------------- Permet de voir où se concentre la vacance par rapport à la pauvreté : ----------- #########
+synth <- vac_pauv %>%
+  st_drop_geometry() %>%
+  group_by(idcar_200m, men, taux_pauvrete, i_est_200) %>%
+  summarise(nb_vacants = n(), .groups = "drop")
