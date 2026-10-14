@@ -5,10 +5,12 @@ library(data.table)
 library(httr2)
 library(tibble)
 library(writexl)
+library(readxl)
 
 # Fichiers d'entrée / sortie
 LOVAC    <- st_read("Data/lovac_dpe.geojson")
 lovac_fil <- read.csv2("Data/lovac_d16_fil.csv", sep=";")
+lovac_exh <- read.csv2("Data/lovac_d16_exh.csv", sep = "|")
 UF <- st_read("Data/uf.geojson")
 
 vers_num <- function(x) as.numeric(gsub(",", ".", as.character(x)))
@@ -61,7 +63,7 @@ ff_ccodros <- paste0("ff_ccodro_", 1:6)
 
 lovac_ndroit <- lovac_idpro %>%
   left_join(
-    lovac_fil %>%
+    lovac_exh %>%
       mutate(ff_idlocal = as.character(ff_idlocal)) %>%
       select(ff_idlocal, ff_ndroit, all_of(ff_idprodroits), all_of(ff_ccodros)),
     by = "ff_idlocal"
@@ -182,7 +184,9 @@ lovac_ndroit %>%
   st_drop_geometry()%>%
   write_xlsx("Data/lovac_ndroit.xlsx")
 
-st_write(lovac_ndroit, "Data/lovac_ndroit.geojson")
+lovac_ndroit_xlsx <- read_excel("Data/lovac_ndroit.xlsx")
+
+st_write(lovac_ndroit_xlsx, "Data/lovac_ndroit.geojson")
 
 
 
@@ -197,13 +201,14 @@ st_write(lovac_ndroit, "Data/lovac_ndroit.geojson")
 # st_write(car_ort, "Data/car_ort.geojson")
 
 car_ort <- st_read("Data/car_ort.geojson")
+lovac_xlsx <- st_read("Data/lovac_ndroit.geojson")
 
 # 1. Créer le taux de pauvreté (men_pauv: nombre de ménages pauvres et men: nombre de ménages)
-carreaux <- carreaux %>%
+carreaux <- car_ort %>%
   mutate(taux_pauvrete = if_else(men > 0, men_pauv / men * 100, NA_real_))
 
 # 2. Mettre les logements dans le même CRS que les carreaux (3035)
-vac_pts <- lovac_ndroit %>%
+vac_pts <- lovac_xlsx %>%
   st_transform(st_crs(carreaux)) 
 
 # 3. Jointure spatiale avec idcar_200m (identiant du carreau), men, men_pau, taux_pauvrete (men_pau/men *100) et i_est_200 (0 : le carreau compte au moins 11 ménages fiscaux, la valeur est issue directement de la source ;
@@ -222,3 +227,43 @@ synth <- vac_pauv %>%
   st_drop_geometry() %>%
   group_by(idcar_200m, men, taux_pauvrete, i_est_200) %>%
   summarise(nb_vacants = n(), .groups = "drop")
+
+
+### ------------------ Situation 1 : dispersion familiale et logement dégradé ------------------- #####
+situation_1 <- st_read("Data/lovac_ruffec_traite.geojson")%>%
+  mutate(ff_ndroit = as.numeric(ff_ndroit)) %>%
+  filter(ff_ndroit > 1,
+         periode_construction == "1_Avant1945",
+         ff_dcapec2 >= 7)#,
+         #lovac_dpe_classe_finale %in% c("G", "") | is.na(lovac_dpe_classe_finale))
+
+### ------------------ Situation 2 : propriétaire volontaire mais freins financiers ------------------- #####
+situation_2 <- st_read("Data/lovac_ruffec_traite.geojson")%>%
+  mutate(ff_ndroit = as.numeric(ff_ndroit),
+         ff_dcapec2 = as.numeric(ff_dcapec2)) %>%
+  filter(ff_ndroit == 1,
+         periode_construction %in% c("2_1945_1960","3_1961_1974"),
+         dplyr::between(ff_dcapec2, 5, 6))
+
+### ------------------ Situation 3 : Réticence locative et faible attractivité ------------------- #####
+situation_3 <- st_read("Data/lovac_ruffec_traite.geojson")%>%
+  mutate(ff_ndroit = as.numeric(ff_ndroit),
+         ff_dcapec2 = as.numeric(ff_dcapec2)) %>%
+  filter(ff_catpro2txt == "SOCIETE CIVILE A VOCATION IMMOBILIERE",
+         periode_construction %in%  c("4_1975_1912", "5_Plus2013"),
+         ff_dcapec2 %in% c(1,2,3,4))
+
+### ------------------ Situation 4 : Cumul des difficultés ------------------- #####
+situation_4 <- st_read("Data/lovac_ruffec_traite.geojson")%>%
+  mutate(ff_ndroit = as.numeric(ff_ndroit),
+         ff_dcapec2 = as.numeric(ff_dcapec2)) %>%
+  filter(ff_ndroit == 1,
+         ff_dcapec2 >= 7,
+         periode_construction == "1_Avant1945",
+         dureevacance >8)
+
+### ------------------ Situation 5 : propriétaire non acteur de son logement ------------------- #####
+situation_5 <- st_read("Data/lovac_ruffec_traite.geojson")%>%
+  mutate(ff_ndroit = as.numeric(ff_ndroit),
+         ff_dcapec2 = as.numeric(ff_dcapec2)) %>%
+  filter(is.na(ff_ndroit))
